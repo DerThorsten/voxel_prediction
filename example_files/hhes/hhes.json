@@ -1,0 +1,41 @@
+{
+    "input_data" : {
+        "hhes_block" : {
+            "data" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes/data_sub.h5",
+                "key":"data"
+            },
+            "gt" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes/labels.h5",
+                "key":"exported_data"
+            }
+        }
+    },
+    "output":{
+        "output_folder": "/home/tbeier/src/voxel_prediction/example_files/hhes/out/"
+    },
+    "settings":{
+        "block_shape" : [120, 120, 120]
+    },
+    "prediction":{
+        "name":"initLayer",
+        "training_data":["hhes_block"],
+        "targets":[
+            ["void",[1]],
+            ["membrane",[2]],
+            ["membrane_boundary",[3]],
+            ["mito",[4]],
+            ["mito_boundary",[5]],   
+            ["stuff",[6]]
+        ],
+        "features":[
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [0],
+                "kwargs":{
+                    "sigmas":[1.0,2.0,3.0,4.0,5.0]
+                }
+            }
+        ]
+    }
+}

@@ -1,0 +1,37 @@
+{
+    "input_data" : {
+        "denk_block" : {
+            "data" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/denk/denk_raw.h5",
+                "key":"raw"
+            },
+            "gt" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/denk/labels.h5",
+                "key":"exported_data"
+            }
+        }
+    },
+    "output":{
+        "output_folder": "/home/tbeier/src/voxel_prediction/example_files/denk/out/"
+    },
+    "settings":{
+        "block_shape" : [100, 100, 100]
+    },
+    "prediction":{
+        "name":"initLayer",
+        "training_data":["denk_block"],
+        "targets":[
+            ["void",[1]],
+            ["mito",[2]]
+        ],
+        "features":[
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [0],
+                "kwargs":{
+                    "sigmas":[1.0,2.0,3.0,4.0,5.0]
+                }
+            }
+        ]
+    }
+}
