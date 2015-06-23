@@ -85,14 +85,14 @@ class IlastikFeatureComputor(object):
 
     def computeFeatures(self, inputArray, blockWithMargin):
         featurerList = []
-        for sigma in [1,2]:#,3,4]:
+        for sigma in [1,2,3,4]:
             inputArray = vigra.taggedView(inputArray,'xyzc')
             smoothed = vigra.filters.gaussianSmoothing(inputArray,sigma).squeeze()
             smoothedL = smoothed[blockWithMargin.localInnerBlock.slicing][:,:,:,None]
             featurerList.append(smoothedL)
 
 
-        for sigma in [1,2]:#,3,4]:
+        for sigma in [1,2,3,4]:
             inputArray = vigra.taggedView(inputArray,'xyzc')
             hessian = vigra.filters.hessianOfGaussianEigenvalues(inputArray,sigma).squeeze()
             hessianL = hessian[blockWithMargin.localInnerBlock.slicing+[slice(0,3)] ][:,:,:,:]
@@ -170,11 +170,12 @@ class VoxelPredict(object):
                 #lock.release()
                 s = appendSingleton(block.slicing)
                 gt = gtDataset[tuple(s)]
-                nLabelsInBlock = skl.countLabels(gt.squeeze(), flatLabels)
+                nLabelsInBlock,roiBegin, roiEnd = skl.countLabelsAndFindRoi(gt.squeeze(), flatLabels)
                 
                 if nLabelsInBlock > 0 :     
-                    lock.acquire(True)               
-                    blocksWithLabels.append((block, nLabelsInBlock))
+                    lock.acquire(True)
+                    newBlock = Block(roiBegin, roiEnd,block.blocking)       
+                    blocksWithLabels.append((newBlock, nLabelsInBlock))
                     lock.release()
 
 
@@ -284,7 +285,6 @@ class VoxelPredict(object):
                         dataLoader = dataLoaders[fCompIndex]
                         neededMargin = fComp.margin()
                         blockWithMargin = block_.blockWithMargin(neededMargin)
-                        
                         dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)
                         featureArray = fComp.computeFeatures(dataArray,blockWithMargin)
                         blockFeatures.append(featureArray)
@@ -302,8 +302,8 @@ class VoxelPredict(object):
                     lock_.release()
 
                 for block,nLabelsInBlock in blocksWithLabels:
-                    #executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
-                    fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    #fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
 
             pbar.finish()
 
