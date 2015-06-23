@@ -4,8 +4,8 @@ from numbers import Number
 
 class BlockWithMargin(object):
     def __init__(self, block, margin):
-        shape = block.shape
-        dim = len(shape)
+        totalShape = block.totalShape
+        dim = len(totalShape)
         self.innerBlock = block
         if(isinstance(margin, Number)):
             m = [margin]*dim
@@ -20,7 +20,7 @@ class BlockWithMargin(object):
         localInnerEnd = [None]*dim
         for d in range(dim):
             begin[d] = max(0, int(begin[d])-m[d])
-            end[d] = min(shape[d], end[d]+m[d])
+            end[d] = min(totalShape[d], end[d]+m[d])
 
             localInnerBegin[d] = block.begin[d] - begin[d]
             localInnerEnd[d] = block.end[d] - begin[d]
@@ -46,10 +46,16 @@ class Block(object):
         return BlockWithMargin(block=self,margin=margin)
 
     @property
-    def shape(self):
+    def totalShape(self):
         return self.blocking.shape
 
-
+    @property
+    def size(self):
+        s = 1
+        for b,e in zip(self.begin,self.end):
+            s*=(e-b)
+        return s
+        
     def __str__(self):
         return "["+str(tuple(self.begin))+" - "+str(tuple(self.end))+"]"
 

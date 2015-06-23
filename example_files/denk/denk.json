@@ -15,7 +15,7 @@
         "output_folder": "/home/tbeier/src/voxel_prediction/example_files/denk/out/"
     },
     "settings":{
-        "block_shape" : [100, 100, 100]
+        "block_shape" : [64, 64, 64]
     },
     "prediction":{
         "name":"initLayer",
