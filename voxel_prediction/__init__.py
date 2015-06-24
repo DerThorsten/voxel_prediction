@@ -101,7 +101,7 @@ class IlastikFeatureComputor(object):
         featuresArray = numpy.concatenate(featurerList,axis=3)
         return featuresArray
 
-nameToFeatureComp = dict(ilastik_features=IlastikFeatureComputor)
+nameToFeatureComp = dict(ilastik_features=skl.IlastikFeatureOperator)
 
 
 def rmLastAxisSingleton(shape):
@@ -158,7 +158,7 @@ class VoxelPredict(object):
         widgets = ['FindBlocksWithLabels: ', Percentage(), ' ', Bar(marker='0',left='[',right=']'),
            ' ', ETA()] #see docs for other options
 
-        pbar = ProgressBar(widgets=widgets, maxval=blocking.nBlocks-1)
+        pbar = ProgressBar(widgets=widgets, maxval=blocking.nBlocks)
         pbar.start()
         with concurrent.futures.ThreadPoolExecutor(max_workers=cpu_count()) as executor:
             lock = threading.Lock()
@@ -170,8 +170,16 @@ class VoxelPredict(object):
                 #lock.release()
                 s = appendSingleton(block.slicing)
                 gt = gtDataset[tuple(s)]
-                nLabelsInBlock,roiBegin, roiEnd = skl.countLabelsAndFindRoi(gt.squeeze(), flatLabels)
+
+                # make roi a global one!!!!
+                nLabelsInBlock,roiBeginLocal, roiEndLocal = skl.countLabelsAndFindRoi(gt.squeeze(), flatLabels)
                 
+                roiBegin = [None]*3
+                roiEnd = [None]*3
+                for d in range(3):
+                    roiBegin[d] = roiBeginLocal[d] + block.begin[d]
+                    roiEnd[d] = roiEndLocal[d] + block.begin[d]
+
                 if nLabelsInBlock > 0 :     
                     lock.acquire(True)
                     newBlock = Block(roiBegin, roiEnd,block.blocking)       
@@ -202,7 +210,8 @@ class VoxelPredict(object):
         dataLoaders = [None]*len(features)
         for fCompIndex, featureGroup in enumerate(features):
             fCls = nameToFeatureComp[featureGroup['name']]
-            fComp = fCls(**featureGroup['kwargs'])
+            #fComp = fCls(**featureGroup['kwargs'])
+            fComp = fCls()
             fComps[fCompIndex] = fComp
             input_channels = featureGroup['input_channels']
             dataLoaders[fCompIndex] = H5Loader(path=path,key=key,channels=input_channels)
@@ -233,6 +242,7 @@ class VoxelPredict(object):
         for newLabelIndex, oldLabels in enumerate(targetLabelLists):
             for ol in oldLabels:
                 self.rLabels[ol] = newLabelIndex + 1
+
 
         
 
@@ -271,10 +281,17 @@ class VoxelPredict(object):
 
                     # get slicing of the block
                     s = appendSingleton(block_.slicing)
-                    gt = gtDataset[tuple(s)].squeeze()
-       
+
+                    gt = gtDataset[tuple(s)]#.squeeze()
+                    if gt.ndim == 4:
+                        gt = gt.reshape(gt.shape[0:3])
                     #print("nLabelsInBlock",nLabelsInBlock)
+
+                    #print("block",block_)
+                    
+                    #print("GT uniQUE",numpy.unique(gt),gt.min(),gt.max())
                     gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(gt,self.rLabels, nLabelsInBlock)
+                    #print(gtVoxelsLabels)
                     gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
 
                     # compute the features
@@ -286,16 +303,32 @@ class VoxelPredict(object):
                         neededMargin = fComp.margin()
                         blockWithMargin = block_.blockWithMargin(neededMargin)
                         dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)
-                        featureArray = fComp.computeFeatures(dataArray,blockWithMargin)
-                        blockFeatures.append(featureArray)
+                        #featureArray = fComp.computeFeatures(dataArray,blockWithMargin)
 
 
-                    blockFeatureArray = numpy.concatenate(blockFeatures, axis=3)
-                    gtVoxelFeatures = blockFeatureArray[gtVoxels[0],gtVoxels[1],gtVoxels[2],:]
+                        
+
+                        if dataArray.ndim == 4 and dataArray.shape[3] == 1:
+                            dataArray = dataArray.reshape(dataArray.shape[0:3])
+
+     
+
+                        newFeatures = fComp.trainFeatures(
+                            array=dataArray,
+                            roiBegin=blockWithMargin.localInnerBlock.begin,
+                            roiEnd=blockWithMargin.localInnerBlock.end,
+                            whereGt=whereGt
+                        )
+
+                        blockFeatures.append(newFeatures)
+
+
+                    blockFeatureArray = numpy.concatenate(blockFeatures, axis=1)
+                    #gtVoxelFeatures = blockFeatureArray[gtVoxels[0],gtVoxels[1],gtVoxels[2],:]
 
                     lock_.acquire(True)
                     labels_.append(gtVoxelsLabels)
-                    features.append(gtVoxelFeatures)
+                    features.append(blockFeatureArray)
                     doneBlocks[0] = doneBlocks[0] + 1
                     pbar.update(doneBlocks[0])
 
@@ -316,10 +349,11 @@ class VoxelPredict(object):
 
         labelsArray =  numpy.concatenate(labels)
         labelsArray = numpy.require(labelsArray, dtype='uint32')[:,None]
-        featuresArray = numpy.concatenate(features,axis=0)
+        featuresArray = numpy.concatenate(features,axis=1).T
 
-
-
+        print("training",featuresArray.shape)
+        print("labelsArray",labelsArray.shape)
+        print("labelsArray Min max",labelsArray.min(),labelsArray.max())
         if False:
             print(labelsArray.shape, featuresArray.shape)
 
@@ -418,15 +452,29 @@ class VoxelPredict(object):
                     blockWithMargin = block_.blockWithMargin(neededMargin)
 
                     dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)
-                    featureArray = fComp.computeFeatures(dataArray,blockWithMargin)
+
+                    if dataArray.ndim == 4 and dataArray.shape[3] ==1:
+                        dataArray = dataArray.reshape(dataArray.shape[0:3])
+
+                    featureArray = fComp.testFeatures(
+                        array=dataArray,
+                        roiBegin=blockWithMargin.localInnerBlock.begin,
+                        roiEnd=blockWithMargin.localInnerBlock.end
+                    )
                     totalFeatures.append(featureArray)
 
-                allFeatures = numpy.concatenate(totalFeatures,axis=3)
-                nFeat = allFeatures.shape[3]
-                allFeaturesFlat = allFeatures.reshape([-1,nFeat])
+                allFeatures = numpy.concatenate(totalFeatures,axis=0)
+                #print("allFeatures",allFeatures.shape)
+
+
+                nFeat = allFeatures.shape[0]
+                allFeaturesFlat = allFeatures.reshape([nFeat,-1]).T
+
+                #print("allFeaturesFlat",allFeaturesFlat.shape)
 
                 probs = rf.predictProbabilities(allFeaturesFlat.view(numpy.ndarray))
-                probs = probs.reshape(allFeatures.shape[0:3]+(nTargets,))
+                #print("probs",probs.shape)
+                probs = probs.reshape(allFeatures.shape[1:4]+(nTargets,))
 
                 #print("probs",probs.shape)
                 slicing = block_.slicing + [slice(0,nTargets)]
