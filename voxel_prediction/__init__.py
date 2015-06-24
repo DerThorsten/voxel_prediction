@@ -210,8 +210,10 @@ class VoxelPredict(object):
         dataLoaders = [None]*len(features)
         for fCompIndex, featureGroup in enumerate(features):
             fCls = nameToFeatureComp[featureGroup['name']]
-            #fComp = fCls(**featureGroup['kwargs'])
-            fComp = fCls()
+            extraKwargs = featureGroup['kwargs']
+            print("kwargs",extraKwargs)
+            fComp = fCls(**featureGroup['kwargs'])
+            #fComp = fCls()
             fComps[fCompIndex] = fComp
             input_channels = featureGroup['input_channels']
             dataLoaders[fCompIndex] = H5Loader(path=path,key=key,channels=input_channels)
