@@ -180,7 +180,8 @@ class VoxelPredict(object):
                     roiBegin[d] = roiBeginLocal[d] + block.begin[d]
                     roiEnd[d] = roiEndLocal[d] + block.begin[d]
 
-                if nLabelsInBlock > 0 :     
+                if nLabelsInBlock > 0 : 
+                    print("unique",numpy.unique(gt))
                     lock.acquire(True)
                     newBlock = Block(roiBegin, roiEnd,block.blocking)       
                     blocksWithLabels.append((newBlock, nLabelsInBlock))
@@ -370,7 +371,7 @@ class VoxelPredict(object):
             self.saveRf(layer, rf)
         if True:
             print("learn rf")
-            rf = vigra.learning.RandomForest(treeCount=200)
+            rf = vigra.learning.RandomForest(treeCount=256)
             oob = rf.learnRF(featuresArray, labelsArray)
             print("OOB",oob)
             self.saveRf(layer, rf)
@@ -394,7 +395,40 @@ class VoxelPredict(object):
         return rf
 
 
-    def predict(self, dataPath, dataKey, outPath):
+
+    def predictROI(self, dataPath, dataKey, roiBegin, roiEnd , outPath):
+        outputFolder = self.projectFile['output']['output_folder']
+        blockShape = self.blockShape
+        fAll = h5py.File(dataPath,'r')
+        dAll = fAll[dataKey]
+
+        print ("data shape",dAll.shape)
+        print(type(roiBegin),type(roiEnd),type(roiBegin[0]))
+
+        if len(dAll.shape) == 3:
+
+            fSub = h5py.File(outputFolder+"tmp.h5",'w')
+            outShape = [roiEnd[d]-roiBegin[d] for d in range(3)]
+            print("outShape ",outShape,"blockshape",blockShape)
+            print(tuple([min(outShape[d]-1,blockShape[d]) for d in range(3)]))
+
+
+            chunks = tuple([min(outShape[d],blockShape[d]) for d in range(3)])
+            print("chhhuuunks",chunks)
+            dSub = fSub.create_dataset("data", outShape, chunks=(30,30,30))
+
+            dSub[:,:,:] = dAll[roiBegin[0]:roiEnd[0],
+                               roiBegin[1]:roiEnd[1],
+                               roiBegin[2]:roiEnd[2]]
+            
+        fSub.close()                   
+        fAll.close()
+
+        self.predict(dataPath=outputFolder+"tmp.h5",
+                     dataKey="data", outPath=outPath)
+
+
+    def predict(self, dataPath, dataKey, outPath, downsample = 1):
         
 
         layer = self.projectFile['prediction']
@@ -466,17 +500,52 @@ class VoxelPredict(object):
                     totalFeatures.append(featureArray)
 
                 allFeatures = numpy.concatenate(totalFeatures,axis=0)
-                #print("allFeatures",allFeatures.shape)
-
-
                 nFeat = allFeatures.shape[0]
+                va = vigra.taggedView(allFeatures, "cxyz")
+                sshape = allFeatures.shape[1:4]
+                subshape = [None]*3
+                #print("nFeat",nFeat,"initshape",allFeatures.shape)
+
+                canDoDs = True
+                if downsample>1:
+                    for d in range(3):
+                        if sshape[d]<6:
+                            canDoDs = False
+                            break
+
+
+                if downsample>1 and canDoDs:
+                    for d in range(3):
+                        if sshape[d]<15:
+                            subshape[d] = sshape[d]
+                        else:
+                            subshape[d] = int((float(sshape[d])/downsample)+0.5)
+                    #print("subshape",subshape)
+
+                    allFeaturesV = numpy.rollaxis(allFeatures,0,4)
+                    #print("allFeaturesV",allFeaturesV.shape)
+                    va = vigra.taggedView(allFeaturesV, "xyzc")
+                    allFeatures = vigra.sampling.resize(va, subshape,order=0)
+                    allFeatures = numpy.rollaxis(allFeatures,3)
+
+                    #print("after reshape shape",allFeatures.shape)
+
+
+                
+
                 allFeaturesFlat = allFeatures.reshape([nFeat,-1]).T
 
                 #print("allFeaturesFlat",allFeaturesFlat.shape)
 
                 probs = rf.predictProbabilities(allFeaturesFlat.view(numpy.ndarray))
                 #print("probs",probs.shape)
+
                 probs = probs.reshape(allFeatures.shape[1:4]+(nTargets,))
+                if downsample>1 and canDoDs:
+                    probs = vigra.taggedView(probs,'xyzc')
+                    probs = vigra.sampling.resize(probs,sshape,order=3)
+    
+
 
                 #print("probs",probs.shape)
                 slicing = block_.slicing + [slice(0,nTargets)]

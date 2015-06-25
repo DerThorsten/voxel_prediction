@@ -30,6 +30,10 @@ def process_command_line():
     parser.add_argument("-o", "--out", type=str,
                         help="outfile")
 
+    parser.add_argument("-rb", "--roiBegin",nargs='+', type=int,default=None,
+                        help="begin of roi")        
+    parser.add_argument("-re", "--roiEnd",nargs='+', type=int,default=None,
+                        help="end of roi")
 
     args = parser.parse_args()
 
@@ -78,8 +82,15 @@ def main():
     if args.modus == 'train':
         predictor.doTraining()
     else :
-        predictor.predict(dataPath=args.data, dataKey=args.key, outPath=args.out)
+        if args.roiBegin is None or args.roiEnd is None:
+            predictor.predict(dataPath=args.data, dataKey=args.key, outPath=args.out)
+        else:
+            roiBegin = args.roiBegin
+            roiEnd = args.roiEnd
+            print("ROI ",roiEnd,roiBegin)
 
+            predictor.predictROI(dataPath=args.data, dataKey=args.key, outPath=args.out,
+                roiBegin=roiBegin,roiEnd=roiEnd )
     return 0
 
 if __name__ == "__main__":
