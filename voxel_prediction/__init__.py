@@ -288,7 +288,7 @@ class VoxelPredict(object):
             print(labelsArray.shape, featuresArray.shape)
 
             RF = RandomForestClassifier
-            rf = RF(n_estimators=20, verbose=0,
+            rf = RF(n_estimators=256, verbose=0,
                     n_jobs=cpu_count(),oob_score=True)
             print("start fitting")
             rf.fit(featuresArray,labelsArray-1)
@@ -298,7 +298,7 @@ class VoxelPredict(object):
             self.saveRf(layer, rf)
         if True:
             print("learn rf")
-            rf = vigra.learning.RandomForest(treeCount=50)
+            rf = vigra.learning.RandomForest(treeCount=256)
             oob = rf.learnRF(featuresArray, labelsArray)
             print("OOB",oob)
             self.saveRf(layer, rf)
@@ -354,7 +354,7 @@ class VoxelPredict(object):
                      dataKey="data", outPath=outPath)
 
 
-    def predict(self, dataPath, dataKey, outPath, downsample = 3):
+    def predict(self, dataPath, dataKey, outPath, downsample = 1):
         
 
         layer = self.projectFile['prediction']
