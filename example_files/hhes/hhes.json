@@ -34,12 +34,20 @@
                 "input_channels" : [0],
                 "kwargs":{
                     "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 10.0],
-                    "smooth":           [1,   1,   1,   1,   1,   1,   1   ],
-                    "laplacian":        [0,   1,   1,   1,   1,   1,   0   ],
-                    "gradMag":          [0,   1,   1,   1,   1,   1,   0   ],
-                    "stEigeValS2":      [0,   1,   1,   1,   1,   1,   0   ],
-                    "stEigeValS4":      [0,   1,   1,   1,   1,   0,   0   ],
-                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   0   ]
+                    "smooth":           [1,   1,   1,   1,   0,   0,   0   ],
+                    "laplacian":        [0,   1,   1,   1,   0,   0,   0   ],
+                    "gradMag":          [0,   1,   1,   1,   0,   0,   0   ],
+                    "stEigeValS2":      [0,   1,   1,   1,   0,   0,   0   ],
+                    "stEigeValS4":      [0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   0,   0,   0   ]
+                }
+            },
+            {
+                "name" : "slic_features",
+                "input_channels" : [0],
+                "kwargs":{
+                    "seedDists": [15],
+                    "scalings": [20]
                 }
             }
         ]

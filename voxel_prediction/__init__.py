@@ -6,6 +6,7 @@ import skneuro
 import skneuro.utilities as skut
 import skneuro.learning as skl
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import pickle
 from block_yielder import *
@@ -20,7 +21,10 @@ from sklearn.ensemble import RandomForestClassifier
 from progressbar import *               # just a simple progress bar
 
 
-
+def reraise(future):
+    ex = future.exception()
+    if ex :
+        raise ex
 
 def redStr(s):
     rs = Fore.RED+s+Fore.RESET + Back.RESET + Style.RESET_ALL
@@ -35,73 +39,23 @@ def ensure_dir(f):
     if not os.path.exists(d):
         os.makedirs(d)
 
-def getTrainingData(projectFile, name):
 
-    dataPath,dataKey = projectFile["input_data"][name]["data"]
-    gtPath,gtKey = projectFile["input_data"][name]["gt"]
+def getPbar(maxval,name=""):
+    cname = redStr(name)
+    widgets = [' %s: '%cname, Percentage(), ' ', Bar(marker='*',left='[',right=']'),
+           ' ',ETA()] #see docs for other options
 
-    return (dataPath,dataKey ), (gtPath,gtKey)
-
-
-
-
-
-class IlastikFeatureComputor(object):
-    def __init__(self,**kwargs):
-        
-        #self.inputDataSets = []
-        #for inputInfo in inputs:
-        #    print(inputInfo)
-        #    # get the h5 path
-        #    path,key,channels = voxelPredict.getH5PathAndChannels(inputInfo, datasetName)
-
-        #    h5File = h5py.File(path, 'r')
-        #    h5DSet = h5File[key]
-
-        #    self.inputDataSets.append((h5File, h5DSet, channels))
-        pass
-    def close(self):
-        #for h5File, h5DSet, channels in self.inputDataSets:
-        #    h5File.close()
-        pass
-
-    def loadInput(self,block):
-        inputArrays = []
-        slicing = block.slicing
-        for h5File, h5DSet, channels in self.inputDataSets:
-            if channels == [0]:
-                s = slicing #+ channels
-            else:
-                s = slicing + channels
-            array = h5DSet[tuple(s)].astype('float32')
-            if array.ndim == 3:
-                array = array[:,:,:,None]
-            inputArrays.append(array)
-
-        return  numpy.concatenate(inputArrays,axis=3)
-
-    def margin(self):
-        return 5
-
-    def computeFeatures(self, inputArray, blockWithMargin):
-        featurerList = []
-        for sigma in [1,2,3,4]:
-            inputArray = vigra.taggedView(inputArray,'xyzc')
-            smoothed = vigra.filters.gaussianSmoothing(inputArray,sigma).squeeze()
-            smoothedL = smoothed[blockWithMargin.localInnerBlock.slicing][:,:,:,None]
-            featurerList.append(smoothedL)
+    pbar = ProgressBar(widgets=widgets, maxval=maxval)
+    #pbar.start()
+    return pbar
 
 
-        for sigma in [1,2,3,4]:
-            inputArray = vigra.taggedView(inputArray,'xyzc')
-            hessian = vigra.filters.hessianOfGaussianEigenvalues(inputArray,sigma).squeeze()
-            hessianL = hessian[blockWithMargin.localInnerBlock.slicing+[slice(0,3)] ][:,:,:,:]
-            featurerList.append(hessianL)
 
-        featuresArray = numpy.concatenate(featurerList,axis=3)
-        return featuresArray
 
-nameToFeatureComp = dict(ilastik_features=skl.IlastikFeatureOperator)
+
+
+nameToFeatureComp = dict(ilastik_features=skl.IlastikFeatureOperator,
+                         slic_features=skl.SlicFeatureOp)
 
 
 def rmLastAxisSingleton(shape):
@@ -115,6 +69,10 @@ def appendSingleton(slices):
     return slices +[ slice(0,1)]
 
 
+def saveChunks(sShape, sChunks, ):
+    pass
+
+
 class VoxelPredict(object):
 
     def __init__(self, projectFile):
@@ -124,17 +82,6 @@ class VoxelPredict(object):
         self.blockShape = tuple(self.projectFile['settings']['block_shape'])
 
     def getH5Path(self, dataName):
-        """
-            inputName: something as 'input_data/raw'
-                to indicate the channel named 'raw'
-                fromm the 'input_data' layer
-                and 'initLayer/mito' would 
-                take the prediction for the class
-                mito from the 'initLayer' predictions.
-
-            dataName: name of the dataset/image.
-                Something like 'denk_block_1'
-        """
         dataInfo = self.projectFile['input_data'][dataName]['data']
         return dataInfo['path'],dataInfo['key']
 
@@ -149,54 +96,45 @@ class VoxelPredict(object):
         return gtFile, gtDataset
 
 
+    def blockRoiToGlobal(self,roiBeginLocal, roiEndLocal, block):
+        roiBegin = [None]*3
+        roiEnd = [None]*3
+        for d in range(3):
+            roiBegin[d] = roiBeginLocal[d] + block.begin[d]
+            roiEnd[d] = roiEndLocal[d] + block.begin[d]
+        return roiBegin, roiEnd
+
     def findBlocksWithLabels(self,blocking,gtDataset, flatLabels):
 
-        # check and remember which block has labels 
-        # (check for the specific needed labels)
         blocksWithLabels = []
+        pbar = getPbar(blocking.nBlocks,name="Find Block With Labels").start()
 
-        widgets = ['FindBlocksWithLabels: ', Percentage(), ' ', Bar(marker='0',left='[',right=']'),
-           ' ', ETA()] #see docs for other options
-
-        pbar = ProgressBar(widgets=widgets, maxval=blocking.nBlocks)
-        pbar.start()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+        with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
             lock = threading.Lock()
             doneBlocks = [0]
             def appendBlocksWithLabels(block,doneBlocks):
-                # get slicing of the block
-                #lock.acquire(True) 
-                #print(block)
-                #lock.release()
+
                 s = appendSingleton(block.slicing)
                 gt = gtDataset[tuple(s)]
-
-                # make roi a global one!!!!
+               
                 nLabelsInBlock,roiBeginLocal, roiEndLocal = skl.countLabelsAndFindRoi(gt.squeeze(), flatLabels)
                 
-                roiBegin = [None]*3
-                roiEnd = [None]*3
-                for d in range(3):
-                    roiBegin[d] = roiBeginLocal[d] + block.begin[d]
-                    roiEnd[d] = roiEndLocal[d] + block.begin[d]
-
-                if nLabelsInBlock > 0 : 
-                    print("unique",numpy.unique(gt))
-                    lock.acquire(True)
+                if nLabelsInBlock > 0 :
+                    roiBegin, roiEnd = self.blockRoiToGlobal(roiBeginLocal,roiEndLocal,block)
+                
+                lock.acquire(True)
+                if nLabelsInBlock > 0 :
                     newBlock = Block(roiBegin, roiEnd,block.blocking)       
                     blocksWithLabels.append((newBlock, nLabelsInBlock))
-                    lock.release()
 
-
-                lock.acquire(True)
                 doneBlocks[0] += 1
                 pbar.update(doneBlocks[0])
                 lock.release()
 
 
             for block in blocking.yieldBlocks():
-                executor.submit(appendBlocksWithLabels,block=block,doneBlocks=doneBlocks)
-                #appendBlocksWithLabels(block=block,doneBlocks=doneBlocks)
+                futureRes = executor.submit(appendBlocksWithLabels,block=block,doneBlocks=doneBlocks)
+                futureRes.add_done_callback(reraise)
         pbar.finish()
         return blocksWithLabels
 
@@ -204,15 +142,12 @@ class VoxelPredict(object):
 
     def getFeatureComps(self, path, key):
 
-
-
         features = self.projectFile['prediction']['features']
         fComps = [None]*len(features)
         dataLoaders = [None]*len(features)
         for fCompIndex, featureGroup in enumerate(features):
             fCls = nameToFeatureComp[featureGroup['name']]
             extraKwargs = featureGroup['kwargs']
-            print("kwargs",extraKwargs)
             fComp = fCls(**featureGroup['kwargs'])
             #fComp = fCls()
             fComps[fCompIndex] = fComp
@@ -225,59 +160,63 @@ class VoxelPredict(object):
 
     def doTraining(self):
 
-        # training data names for  
-        # initial layer
         layer = self.projectFile['prediction']
 
-
+        ######################################################
+        # THIS IS THE ACTUAL TRAINING SET WHICH WE WILL FILL
+        ######################################################
         labels = []
         features = []
 
-        # get targets for this layer
+        ######################################################
+        #   Labels (map from input labels to training labels)
+        ######################################################
+        # get targets 
         targetNames = [ t[0] for t in layer['targets']]
         targetLabelLists = [ t[1] for t in layer['targets']]
-
-
+        # all needed labels to predict
         flatLabels = numpy.concatenate(targetLabelLists).astype('uint32')
-
-        # compute remapping
+        # compute remapping from old labels (starting at 1)
+        # to new labels (starting at 0)
         self.rLabels = numpy.zeros(flatLabels.max()+1,dtype='uint32')
         for newLabelIndex, oldLabels in enumerate(targetLabelLists):
             for ol in oldLabels:
                 self.rLabels[ol] = newLabelIndex + 1
 
-
         
-
-        # iterate over images
+        ######################################################
+        # Iterate over images
+        ######################################################
         trainingData = layer['training_data']
         for dsName in trainingData:
 
-            # open the gt dataset
+            ######################################################
+            # open the gt dataset and get the blocking for the
+            # dataset
+            ######################################################
             gtFile,gtDataset = self.getAndOpenGt(dsName)
-            print("dataset",dsName,gtDataset.shape)
+            print(redStr("dataset"),greenStr(dsName),gtDataset.shape)
             blocking = Blocking(shape=rmLastAxisSingleton(gtDataset.shape), 
                                 blockShape=self.blockShape)
 
+            ######################################################
             # prepare feature comp. for this image
+            ######################################################
             path,key = self.getH5Path(dsName)
             fComps,dataLoaders = self.getFeatureComps(path, key)
 
+            ######################################################
             # check and remember which block has labels 
-            # (check for the specific needed labels)
-            with vigra.Timer("FindBlockWithLabels"):
-                blocksWithLabels = self.findBlocksWithLabels(blocking, gtDataset, flatLabels)
-            print("#blocksWithLabels",len(blocksWithLabels))
+            ######################################################
+            blocksWithLabels = self.findBlocksWithLabels(blocking, gtDataset, flatLabels)            
+            print(redStr("#blocksWithLabels"),len(blocksWithLabels))
 
 
-
-            widgets = ['ComputeFeatures: ', Percentage(), ' ', Bar(marker='0',left='[',right=']'),
-            ' ', ETA()] #see docs for other options
-
-            pbar = ProgressBar(widgets=widgets, maxval=len(blocksWithLabels))
-            pbar.start()
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+            ######################################################
+            # parallel blockwise feature computation
+            ######################################################
+            pbar = getPbar(len(blocksWithLabels),"ComputeFeatures").start()
+            with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
                 lock = threading.Lock()
                 doneBlocks=[0]
                 def fThread(block_,nLabelsInBlock,lock_,labels_,doneBlocks):
@@ -288,10 +227,7 @@ class VoxelPredict(object):
                     gt = gtDataset[tuple(s)]#.squeeze()
                     if gt.ndim == 4:
                         gt = gt.reshape(gt.shape[0:3])
-                    #print("nLabelsInBlock",nLabelsInBlock)
 
-                    #print("block",block_)
-                    
                     #print("GT uniQUE",numpy.unique(gt),gt.min(),gt.max())
                     gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(gt,self.rLabels, nLabelsInBlock)
                     #print(gtVoxelsLabels)
@@ -303,19 +239,12 @@ class VoxelPredict(object):
                         fName = featureGroup['name']
                         fComp = fComps[fCompIndex]
                         dataLoader = dataLoaders[fCompIndex]
-                        neededMargin = fComp.margin()
-                        blockWithMargin = block_.blockWithMargin(neededMargin)
-                        dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)
-                        #featureArray = fComp.computeFeatures(dataArray,blockWithMargin)
-
-
-                        
-
+                        blockWithMargin = block_.blockWithMargin(fComp.margin())
+                        dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)                      
                         if dataArray.ndim == 4 and dataArray.shape[3] == 1:
                             dataArray = dataArray.reshape(dataArray.shape[0:3])
 
-     
-
+                        # heavy load (C++)
                         newFeatures = fComp.trainFeatures(
                             array=dataArray,
                             roiBegin=blockWithMargin.localInnerBlock.begin,
@@ -325,20 +254,18 @@ class VoxelPredict(object):
 
                         blockFeatures.append(newFeatures)
 
-
-                    blockFeatureArray = numpy.concatenate(blockFeatures, axis=1)
-                    #gtVoxelFeatures = blockFeatureArray[gtVoxels[0],gtVoxels[1],gtVoxels[2],:]
+                    blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
 
                     lock_.acquire(True)
                     labels_.append(gtVoxelsLabels)
                     features.append(blockFeatureArray)
                     doneBlocks[0] = doneBlocks[0] + 1
                     pbar.update(doneBlocks[0])
-
                     lock_.release()
 
                 for block,nLabelsInBlock in blocksWithLabels:
-                    executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    futureRes = executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    futureRes.add_done_callback(reraise)
                     #fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
 
             pbar.finish()
@@ -371,7 +298,7 @@ class VoxelPredict(object):
             self.saveRf(layer, rf)
         if True:
             print("learn rf")
-            rf = vigra.learning.RandomForest(treeCount=256)
+            rf = vigra.learning.RandomForest(treeCount=50)
             oob = rf.learnRF(featuresArray, labelsArray)
             print("OOB",oob)
             self.saveRf(layer, rf)
@@ -414,7 +341,6 @@ class VoxelPredict(object):
 
 
             chunks = tuple([min(outShape[d],blockShape[d]) for d in range(3)])
-            print("chhhuuunks",chunks)
             dSub = fSub.create_dataset("data", outShape, chunks=(30,30,30))
 
             dSub[:,:,:] = dAll[roiBegin[0]:roiEnd[0],
@@ -428,7 +354,7 @@ class VoxelPredict(object):
                      dataKey="data", outPath=outPath)
 
 
-    def predict(self, dataPath, dataKey, outPath, downsample = 1):
+    def predict(self, dataPath, dataKey, outPath, downsample = 3):
         
 
         layer = self.projectFile['prediction']
@@ -448,8 +374,10 @@ class VoxelPredict(object):
         # create outfile
         outfileShape = tuple(spatialShape) + (nTargets,)
         h5OutFile = h5py.File(outPath,'w')
-        chucks = blockShape + (nTargets,)
-        outDset = h5OutFile.create_dataset("data", outfileShape, chunks=chucks)
+        chunks = list(blockShape + (nTargets,))
+        for d in  range(3):
+            chunks[d] = min(spatialShape[d],chunks[d])
+        outDset = h5OutFile.create_dataset("data", outfileShape, chunks=tuple(chunks))
 
 
         #blocking
@@ -462,24 +390,15 @@ class VoxelPredict(object):
         rf = self.loadRf()
 
 
-        widgets = ['Predict: ', Percentage(), ' ', Bar(marker='0',left='[',right=']'),
-           ' ', ETA()] #see docs for other options
-
-        pbar = ProgressBar(widgets=widgets, maxval=blocking.nBlocks)
-        pbar.start()
-
-        
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=cpu_count()) as executor:
+        pbar = getPbar(blocking.nBlocks,'Predict').start()
+        with ThreadPoolExecutor(max_workers=cpu_count()) as executor:
 
             lock = threading.Lock()
             doneBlocks = [0]
             
 
             def threadFunc(block_,doneBlocks_):
-                global doneBlocks
                 totalFeatures = []
-
                 for fCompIndex, featureGroup in enumerate(layer['features']):
 
                     fComp = fComps[fCompIndex]
@@ -558,7 +477,8 @@ class VoxelPredict(object):
                 lock.release()
 
             for block in blocking.yieldBlocks(): 
-                executor.submit(threadFunc, block_=block,doneBlocks_=doneBlocks)
+                futureRes = executor.submit(threadFunc, block_=block,doneBlocks_=doneBlocks)
+                futureRes.add_done_callback(reraise)
                 #threadFunc(block_=block,doneBlocks_=doneBlocks)
 
         pbar.finish()
