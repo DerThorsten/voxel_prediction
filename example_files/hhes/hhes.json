@@ -2,7 +2,7 @@
     "input_data" : {
         "hhes_block" : {
             "data" : {
-                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes/data_sub.h5",
+                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes/data_sub_n_1.h5",
                 "key":"data"
             },
             "gt" : {

@@ -13,13 +13,17 @@ class H5Loader(object):
 
     def load(self,slicing):
 
-        
+        ch = self.channels
+        nCh = len(ch)
+
         ndim = len(self.h5Ds.shape) 
-        if self.channels == [0]:
+        if nCh == 1:
             if ndim == 3:
+                if ch[0] != 0:
+                    raise RuntimeError("channel of 3D array must be [0]")
                 a = self.h5Ds[tuple(slicing)].astype('float32')[:,:,:,None]
             elif ndim == 4:
-                a = self.h5Ds[tuple(slicing+[0])].astype('float32')[:,:,:,None]
+                a = self.h5Ds[tuple(slicing+[ch[0]])].astype('float32')
             else:
                 raise RuntimeError("wrong dimensions in dataset")
         else:

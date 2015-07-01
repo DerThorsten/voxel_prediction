@@ -16,7 +16,7 @@ import thread
 import threading
 from multiprocessing import cpu_count
 from sklearn.ensemble import RandomForestClassifier
-
+import operator
 
 from progressbar import *               # just a simple progress bar
 
@@ -255,7 +255,7 @@ class VoxelPredict(object):
                         blockFeatures.append(newFeatures)
 
                     blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
-
+                    #print("totalFShape",blockFeatureArray.shape)
                     lock_.acquire(True)
                     labels_.append(gtVoxelsLabels)
                     features.append(blockFeatureArray)
@@ -332,21 +332,33 @@ class VoxelPredict(object):
         print ("data shape",dAll.shape)
         print(type(roiBegin),type(roiEnd),type(roiBegin[0]))
 
+        inputDataShape = dAll.shape
+        spatialShape = inputDataShape[0:3]
+        hasAxis = len(inputDataShape) == 4
+        spatialRoiShape = map(operator.sub,roiEnd,roiBegin)
+
+        subShape = list(spatialRoiShape)
+        chunks = [30,30,30]
+        chunks = map(min, chunks, subShape)
+        if(hasAxis):
+            subShape += [inputDataShape[3]]
+            chunks += [1]
+
+        fSub = h5py.File(outputFolder+"tmp.h5",'w')   
+        dSub = fSub.create_dataset("data", subShape, chunks=tuple(chunks))
+
+
         if len(dAll.shape) == 3:
-
-            fSub = h5py.File(outputFolder+"tmp.h5",'w')
-            outShape = [roiEnd[d]-roiBegin[d] for d in range(3)]
-            print("outShape ",outShape,"blockshape",blockShape)
-            print(tuple([min(outShape[d]-1,blockShape[d]) for d in range(3)]))
-
-
-            chunks = tuple([min(outShape[d],blockShape[d]) for d in range(3)])
-            dSub = fSub.create_dataset("data", outShape, chunks=(30,30,30))
-
             dSub[:,:,:] = dAll[roiBegin[0]:roiEnd[0],
                                roiBegin[1]:roiEnd[1],
                                roiBegin[2]:roiEnd[2]]
-            
+        elif len(dAll.shape) == 4:
+            dSub[:,:,:,:] = dAll[roiBegin[0]:roiEnd[0],
+                                 roiBegin[1]:roiEnd[1],
+                                 roiBegin[2]:roiEnd[2],:]
+        else:
+            raise RuntimeError("wrong dimension")
+
         fSub.close()                   
         fAll.close()
 

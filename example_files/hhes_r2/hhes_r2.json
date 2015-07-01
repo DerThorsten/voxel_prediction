@@ -1,0 +1,133 @@
+{
+    "input_data" : {
+        "hhes_block_2" : {
+            "data" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes_r2/pr_data_sub_n_2.h5",
+                "key":"data"
+            },
+            "gt" : {
+                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes_r2/labels_block_2.h5",
+                "key":"labels"
+            }
+        }
+    },
+    "output":{
+        "output_folder": "/home/tbeier/src/voxel_prediction/example_files/hhes_r2/out/"
+    },
+    "settings":{
+        "block_shape" : [64 , 64 , 64 ]
+    },
+    "prediction":{
+        "name":"initLayer",
+        "training_data":["hhes_block_2"],
+        "targets":[
+            ["void",[1]],
+            ["membrane",[2]],
+            ["membrane_boundary",[3]],
+            ["mito",[4]],
+            ["mito_boundary",[5]],   
+            ["stuff",[6]]
+        ],
+        "features":[
+            {
+                "name" : "ilastik_features",
+                "comment":"ON RAW DATA",
+                "input_channels" : [0],
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   1,   1,   1,   1,   1,   1,   0   ],
+                    "gradMag":          [0,   1,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   1,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   1,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   0   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [1],
+                "comment":"ON VOID",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   2,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   0,   0,   0   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [2],
+                "comment":"ON MEMBRANE",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   1   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [3],
+                "comment":"ON MEMBRANE BOUNDARY",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   1   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [4],
+                "comment":"ON MITO",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   1   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [5],
+                "comment":"ON MITO BOUNDARY",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   1,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   1   ]
+                }
+            },
+            {
+                "name" : "ilastik_features",
+                "input_channels" : [6],
+                "comment":"ON STUFF",
+                "kwargs":{
+                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 3.5, 5.0, 7.5, 10.0],
+                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
+                    "laplacian":        [0,   0,   0,   0,   0,   0,   0,   0   ],
+                    "gradMag":          [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS2":      [0,   0,   1,   1,   1,   1,   0,   0   ],
+                    "stEigeValS4":      [0,   0,   1,   1,   1,   0,   0,   0   ],
+                    "hessianEigenVal":  [0,   0,   1,   1,   1,   0,   0,   0   ]
+                }
+            }
+        ]
+    }
+}
+        
