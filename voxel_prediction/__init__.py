@@ -73,6 +73,67 @@ def saveChunks(sShape, sChunks, ):
     pass
 
 
+
+def normalVol(shape, center,scale):
+    size = numpy.prod(shape)
+    a = numpy.random.normal(center,scale,size).reshape(shape)
+    a = vigra.taggedView(a, 'xyz')
+    return a
+
+
+
+def augmentGaussian(data, lAdd, gAdd, gMult):
+    """
+        lAdd : sigma of local additive gaussian noise
+        gAdd : sigma of global additive gaussian noise
+        gMult : sigma of global multiplicative guasian noise
+    """
+    data = vigra.taggedView(data, 'xyz')
+    shape = data.shape
+
+    # local and global additive and multiplicative
+    # gaussian noise
+    toAdd =  normalVol(shape,0.0,lAdd)+numpy.random.normal(0.0,gAdd)
+    augmentedData = data.copy()
+    augmentedData += toAdd
+    augmentedData *= numpy.abs(numpy.random.normal(1.0,gMult))
+    augmentedData = numpy.clip(augmentedData,0,255)
+
+    return augmentedData
+
+
+
+def binaryBlobs(shape, p=0.00001, radius=6, r=3):
+    data = numpy.zeros(shape,dtype='uint8')
+    r = numpy.random.rand(*shape)
+    data[r<p] = 1
+    data = vigra.filters.multiBinaryDilation(data,radius)
+    return data
+
+
+
+
+
+
+def augmentRaw(data, lAdd=8.0, gAdd=10.0, gMult=0.4):
+    """
+        lAdd : sigma of local additive gaussian noise
+        gAdd : sigma of global additive gaussian noise
+        gMult : sigma of global multiplicative guasian noise
+    """
+    
+
+
+
+    # apply gaussian augmentation
+    gaussianAugmentedData = augmentGaussian(data=data, lAdd=lAdd,
+                                            gAdd=gAdd, gMult=gMult)
+
+    augmentedData = gaussianAugmentedData
+
+    return augmentedData
+
+
 class VoxelPredict(object):
 
     def __init__(self, projectFile):
@@ -149,14 +210,22 @@ class VoxelPredict(object):
             fCls = nameToFeatureComp[featureGroup['name']]
             extraKwargs = featureGroup['kwargs']
             fComp = fCls(**featureGroup['kwargs'])
+            input_channels = featureGroup['input_channels']
+            fComp.inputChannels = input_channels
             #fComp = fCls()
             fComps[fCompIndex] = fComp
-            input_channels = featureGroup['input_channels']
+           
             dataLoaders[fCompIndex] = H5Loader(path=path,key=key,channels=input_channels)
 
         return fComps, dataLoaders
 
 
+    def maxMargin(self, fComps):
+        margin = (0,0,0)
+        for f in fComps:
+            m = f.margin()
+            margin = map(max, zip(m, margin))
+        return margin
 
     def doTraining(self):
 
@@ -205,6 +274,10 @@ class VoxelPredict(object):
             path,key = self.getH5Path(dsName)
             fComps,dataLoaders = self.getFeatureComps(path, key)
 
+            maxM = self.maxMargin(fComps)
+
+            print("the total margin",maxM)
+
             ######################################################
             # check and remember which block has labels 
             ######################################################
@@ -233,32 +306,49 @@ class VoxelPredict(object):
                     #print(gtVoxelsLabels)
                     gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
 
-                    # compute the features
-                    blockFeatures = []
-                    for fCompIndex, featureGroup in enumerate(layer['features']):
-                        fName = featureGroup['name']
-                        fComp = fComps[fCompIndex]
-                        dataLoader = dataLoaders[fCompIndex]
-                        blockWithMargin = block_.blockWithMargin(fComp.margin())
-                        dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)                      
-                        if dataArray.ndim == 4 and dataArray.shape[3] == 1:
-                            dataArray = dataArray.reshape(dataArray.shape[0:3])
+                    #print("get the total data array")
+                    blockWithTotalMargin = block_.blockWithMargin(maxM)
+                    dataWithAllChannels_ = dataLoaders[0].load(blockWithTotalMargin.outerBlock.slicing)
 
-                        # heavy load (C++)
-                        newFeatures = fComp.trainFeatures(
-                            array=dataArray,
-                            roiBegin=blockWithMargin.localInnerBlock.begin,
-                            roiEnd=blockWithMargin.localInnerBlock.end,
-                            whereGt=whereGt
-                        )
+                    for i in range(15):
 
-                        blockFeatures.append(newFeatures)
+                        if i == 0:
+                            dataWithAllChannels = dataWithAllChannels_
+                        else:
+                            dataWithAllChannels = augmentRaw(dataWithAllChannels_.squeeze())[:,:,:,None]
 
-                    blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
-                    #print("totalFShape",blockFeatureArray.shape)
+                        # compute the features
+                        blockFeatures = []
+                        for fCompIndex, featureGroup in enumerate(layer['features']):
+                            fName = featureGroup['name']
+                            fComp = fComps[fCompIndex]
+                            dataLoader = dataLoaders[fCompIndex]
+                            blockWithMargin = block_.blockWithMargin(fComp.margin())
+                            #dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)     
+                            dataArray = dataWithAllChannels[:,:,:,fComp.inputChannels]
+
+
+                            if dataArray.ndim == 4 and dataArray.shape[3] == 1:
+                                dataArray = dataArray.reshape(dataArray.shape[0:3])
+
+                            # heavy load (C++)
+                            newFeatures = fComp.trainFeatures(
+                                array=dataArray,
+                                roiBegin=blockWithTotalMargin.localInnerBlock.begin,
+                                roiEnd=blockWithTotalMargin.localInnerBlock.end,
+                                whereGt=whereGt
+                            )
+
+                            blockFeatures.append(newFeatures)
+
+                        blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
+                        #print("totalFShape",blockFeatureArray.shape)
+                        lock_.acquire(True)
+                        features.append(blockFeatureArray)
+                        labels_.append(gtVoxelsLabels)
+                        lock_.release()
+
                     lock_.acquire(True)
-                    labels_.append(gtVoxelsLabels)
-                    features.append(blockFeatureArray)
                     doneBlocks[0] = doneBlocks[0] + 1
                     pbar.update(doneBlocks[0])
                     lock_.release()
@@ -279,29 +369,57 @@ class VoxelPredict(object):
 
         labelsArray =  numpy.concatenate(labels)
         labelsArray = numpy.require(labelsArray, dtype='uint32')[:,None]
-        featuresArray = numpy.concatenate(features,axis=1).T
+        featureArray = numpy.concatenate(features,axis=1).T
 
-        print("training",featuresArray.shape)
-        print("labelsArray",labelsArray.shape)
-        print("labelsArray Min max",labelsArray.min(),labelsArray.max())
-        if False:
-            print(labelsArray.shape, featuresArray.shape)
+        featureArray, labelsArray = self.augmentTrainingSet(featureArray,labelsArray)
 
-            RF = RandomForestClassifier
-            rf = RF(n_estimators=256, verbose=0,
-                    n_jobs=cpu_count(),oob_score=True)
-            print("start fitting")
-            rf.fit(featuresArray,labelsArray-1)
-            print("end fitting")
-            print("OOB",rf.oob_score_)
 
-            self.saveRf(layer, rf)
-        if True:
-            print("learn rf")
-            rf = vigra.learning.RandomForest(treeCount=256)
-            oob = rf.learnRF(featuresArray, labelsArray)
-            print("OOB",oob)
-            self.saveRf(layer, rf)
+    
+
+        print("learn rf")
+        rf = vigra.learning.RandomForest(treeCount=256)
+        oob = rf.learnRF(featureArray, labelsArray)
+        print("OOB",oob)
+        self.saveRf(layer, rf)
+
+
+    def augmentTrainingSet(self,featureArray, labelsArray,varMult=0.05, n=15):
+        print("Raw Features ",featureArray.shape)
+        #print("labelsArray",labelsArray.shape)
+
+
+
+
+        outputFolder = self.projectFile['output']['output_folder']
+        ensure_dir(outputFolder)
+        vigra.impex.writeHDF5(featureArray,outputFolder+"features_X.h5","data")
+        vigra.impex.writeHDF5(featureArray,outputFolder+"labels.h5","data")
+
+
+        
+        fshape = featureArray.shape
+
+
+        fvar = numpy.var(featureArray,axis=0)
+        assert fvar.size == featureArray.shape[1]
+        fvar = numpy.sqrt(fvar)*varMult
+
+        f = [featureArray]
+        for i in range(n):
+            featureArray2 = featureArray.copy()
+            r = numpy.random.normal(0,1.0, featureArray.size).reshape(fshape)
+            r *=fvar[None,:]
+            featureArray2 += r
+            f.append(featureArray2)
+        featureArray = numpy.concatenate(f,axis=0)
+        labelsArray = numpy.concatenate([labelsArray]*len(f),axis=0)
+
+        print("New Features ",featureArray.shape)
+        #print("labelsArray",labelsArray.shape)
+
+        return featureArray, labelsArray
+
+
     def saveRf(self,layer, rf):
 
 

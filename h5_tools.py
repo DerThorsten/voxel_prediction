@@ -9,13 +9,21 @@ class H5Loader(object):
         self.h5File = h5py.File(path,'r')
         self.h5Ds = self.h5File[key]
 
+    def loadAllChannels(self, slicing):
+        shape = self.h5Ds.shape
+        ndim = len(self.h5Ds.shape) 
 
+        if ndim == 3:
+            return self.h5Ds[tuple(slicing)].astype('float32')[:,:,:,None]
+        elif ndim == 4:
+            s = slice(0,shape[3])
+            s = tuple(slicing + [s])
+            return self.h5Ds[tuple(s)].astype('float32')
 
     def load(self,slicing):
 
         ch = self.channels
         nCh = len(ch)
-
         ndim = len(self.h5Ds.shape) 
         if nCh == 1:
             if ndim == 3:

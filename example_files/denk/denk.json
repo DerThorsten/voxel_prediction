@@ -7,7 +7,7 @@
             },
             "gt" : {
                 "path": "/home/tbeier/src/voxel_prediction/example_files/denk/labels.h5",
-                "key":"exported_data"
+                "key":"labels"
             }
         }
     },
