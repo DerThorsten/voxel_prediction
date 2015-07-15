@@ -2,7 +2,7 @@
     "input_data" : {
         "hhes_block_3" : {
             "data" : {
-                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes_rb/pr_data_sub_n_3.h5",
+                "path": "/home/tbeier/hhes_r2/prediction_and_raw/semantic_r2/pr_data_sub_n_3.h5",
                 "key":"data"
             },
             "gt" : {
@@ -12,7 +12,7 @@
         },
         "hhes_block_4" : {
             "data" : {
-                "path": "/home/tbeier/src/voxel_prediction/example_files/hhes_rb/pr_data_sub_n_4.h5",
+                "path": "/home/tbeier/hhes_r2/prediction_and_raw/semantic_r2/pr_data_sub_n_4.h5",
                 "key":"data"
             },
             "gt" : {
@@ -29,7 +29,7 @@
     },
     "prediction":{
         "name":"initLayer",
-        "training_data":["hhes_block_3,hhes_block_4"],
+        "training_data":["hhes_block_3","hhes_block_4"],
         "targets":[
             ["void",[1]],
             ["membrane",[2]]
