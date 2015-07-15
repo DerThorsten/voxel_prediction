@@ -24,6 +24,16 @@
             ["void",[1]],
             ["mito",[2]]
         ],
+        "augmentation":{
+            "nAugmentation":10,
+            "0":{
+                "name":"rawAugmentor",
+                "lAdd":8.0,
+                "gAdd":10.0,
+                "gMult":0.3,
+                "clip":[0.0,255]
+            }
+        },
         "features":[
             {
                 "name" : "ilastik_features",

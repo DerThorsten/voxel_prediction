@@ -1,54 +1,20 @@
 from __future__ import print_function
-from colorama import Fore, Back, Style
 import h5py
 import vigra
+import numpy
 import skneuro
-import skneuro.utilities as skut
 import skneuro.learning as skl
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-import sys
-import pickle
-from block_yielder import *
-from h5_tools import *
-import os
-import thread
 import threading
 from multiprocessing import cpu_count
-from sklearn.ensemble import RandomForestClassifier
 import operator
 
-from progressbar import *               # just a simple progress bar
-
-
-def reraise(future):
-    ex = future.exception()
-    if ex :
-        raise ex
-
-def redStr(s):
-    rs = Fore.RED+s+Fore.RESET + Back.RESET + Style.RESET_ALL
-    return rs
-
-def greenStr(s):
-    rs = Fore.GREEN+s+Fore.RESET + Back.RESET + Style.RESET_ALL
-    return rs
-
-def ensure_dir(f):
-    d = os.path.dirname(f)
-    if not os.path.exists(d):
-        os.makedirs(d)
-
-
-def getPbar(maxval,name=""):
-    cname = redStr(name)
-    widgets = [' %s: '%cname, Percentage(), ' ', Bar(marker='*',left='[',right=']'),
-           ' ',ETA()] #see docs for other options
-
-    pbar = ProgressBar(widgets=widgets, maxval=maxval)
-    #pbar.start()
-    return pbar
-
+# others from this package
+from block_yielder import *
+from data_augmentor import *
+from tools import *
+from h5_tools import *
+from pertubator import *
 
 
 
@@ -58,88 +24,11 @@ nameToFeatureComp = dict(ilastik_features=skl.IlastikFeatureOperator,
                          slic_features=skl.SlicFeatureOp)
 
 
-def rmLastAxisSingleton(shape):
-    if shape[-1] == 1:
-        return shape[0:-1]
-    else:
-        return shape
-
-
-def appendSingleton(slices):
-    return slices +[ slice(0,1)]
-
-
-def saveChunks(sShape, sChunks, ):
-    pass
-
-
-
-def normalVol(shape, center,scale):
-    size = numpy.prod(shape)
-    a = numpy.random.normal(center,scale,size).reshape(shape)
-    a = vigra.taggedView(a, 'xyz')
-    return a
-
-
-
-def augmentGaussian(data, lAdd, gAdd, gMult):
-    """
-        lAdd : sigma of local additive gaussian noise
-        gAdd : sigma of global additive gaussian noise
-        gMult : sigma of global multiplicative guasian noise
-    """
-    data = vigra.taggedView(data, 'xyz')
-    shape = data.shape
-
-    # local and global additive and multiplicative
-    # gaussian noise
-    toAdd =  normalVol(shape,0.0,lAdd)+numpy.random.normal(0.0,gAdd)
-    augmentedData = data.copy()
-    augmentedData += toAdd
-    augmentedData *= numpy.abs(numpy.random.normal(1.0,gMult))
-    augmentedData = numpy.clip(augmentedData,0,255)
-
-    return augmentedData
-
-
-
-def binaryBlobs(shape, p=0.00001, radius=6, r=3):
-    data = numpy.zeros(shape,dtype='uint8')
-    r = numpy.random.rand(*shape)
-    data[r<p] = 1
-    data = vigra.filters.multiBinaryDilation(data,radius)
-    return data
-
-
-
-
-
-
-def augmentRaw(data, lAdd=8.0, gAdd=10.0, gMult=0.4):
-    """
-        lAdd : sigma of local additive gaussian noise
-        gAdd : sigma of global additive gaussian noise
-        gMult : sigma of global multiplicative guasian noise
-    """
-    
-
-
-
-    # apply gaussian augmentation
-    gaussianAugmentedData = augmentGaussian(data=data, lAdd=lAdd,
-                                            gAdd=gAdd, gMult=gMult)
-
-    augmentedData = gaussianAugmentedData
-
-    return augmentedData
-
 
 class VoxelPredict(object):
 
     def __init__(self, projectFile):
         self.projectFile = projectFile
-        #for layer in self.architecture:
-        #    layerName = layer['name']
         self.blockShape = tuple(self.projectFile['settings']['block_shape'])
 
     def getH5Path(self, dataName):
@@ -221,6 +110,10 @@ class VoxelPredict(object):
 
 
     def maxMargin(self, fComps):
+        """
+            returns the maximal margin of
+            all the feature computors
+        """
         margin = (0,0,0)
         for f in fComps:
             m = f.margin()
@@ -310,7 +203,7 @@ class VoxelPredict(object):
                     blockWithTotalMargin = block_.blockWithMargin(maxM)
                     dataWithAllChannels_ = dataLoaders[0].load(blockWithTotalMargin.outerBlock.slicing)
 
-                    for i in range(15):
+                    for i in range(2):
 
                         if i == 0:
                             dataWithAllChannels = dataWithAllChannels_
@@ -371,7 +264,7 @@ class VoxelPredict(object):
         labelsArray = numpy.require(labelsArray, dtype='uint32')[:,None]
         featureArray = numpy.concatenate(features,axis=1).T
 
-        featureArray, labelsArray = self.augmentTrainingSet(featureArray,labelsArray)
+        featureArray, labelsArray = self.prepareTrainingSet(featureArray,labelsArray)
 
 
     
@@ -383,63 +276,30 @@ class VoxelPredict(object):
         self.saveRf(layer, rf)
 
 
-    def augmentTrainingSet(self,featureArray, labelsArray,varMult=0.05, n=15):
+    def prepareTrainingSet(self,featureArray, labelsArray,varMult=0.05, n=15):
         print("Raw Features ",featureArray.shape)
         #print("labelsArray",labelsArray.shape)
-
-
-
-
         outputFolder = self.projectFile['output']['output_folder']
         ensure_dir(outputFolder)
         vigra.impex.writeHDF5(featureArray,outputFolder+"features_X.h5","data")
         vigra.impex.writeHDF5(featureArray,outputFolder+"labels.h5","data")
 
-
+        return augmentGaussianPertubation(featureArray,labelsArray,
+                                          varMult=varMult,n=n)
         
-        fshape = featureArray.shape
-
-
-        fvar = numpy.var(featureArray,axis=0)
-        assert fvar.size == featureArray.shape[1]
-        fvar = numpy.sqrt(fvar)*varMult
-
-        f = [featureArray]
-        for i in range(n):
-            featureArray2 = featureArray.copy()
-            r = numpy.random.normal(0,1.0, featureArray.size).reshape(fshape)
-            r *=fvar[None,:]
-            featureArray2 += r
-            f.append(featureArray2)
-        featureArray = numpy.concatenate(f,axis=0)
-        labelsArray = numpy.concatenate([labelsArray]*len(f),axis=0)
-
-        print("New Features ",featureArray.shape)
-        #print("labelsArray",labelsArray.shape)
-
-        return featureArray, labelsArray
+        
 
 
     def saveRf(self,layer, rf):
-
-
         outputFolder = self.projectFile['output']['output_folder']
         ensure_dir(outputFolder)
-
         rf.writeHDF5(outputFolder+"vigra_rf.h5")
-        #pickledRF = pickle.dumps(rf)
-        #open(outputFolder+"rf3.dump",'w').write(pickledRF) 
 
         
     def loadRf(self):
-
         outputFolder = self.projectFile['output']['output_folder']
-        #pickledRFStr = open(outputFolder+"rf3.dump",'r').read() 
-        #rf = pickle.loads(pickledRFStr)
         rf = vigra.learning.RandomForest(outputFolder+"vigra_rf.h5")
         return rf
-
-
 
     def predictROI(self, dataPath, dataKey, roiBegin, roiEnd , outPath):
         outputFolder = self.projectFile['output']['output_folder']
