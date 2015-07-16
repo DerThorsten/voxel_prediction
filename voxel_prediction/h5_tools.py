@@ -16,9 +16,9 @@ class H5Loader(object):
         if ndim == 3:
             return self.h5Ds[tuple(slicing)].astype('float32')[:,:,:,None]
         elif ndim == 4:
-            s = slice(0,shape[3])
-            s = tuple(slicing + [s])
-            return self.h5Ds[tuple(s)].astype('float32')
+            s = s
+            s = tuple(slicing + [slice(0,shape[3])] )
+            return self.h5Ds[s].astype('float32')
 
     def load(self,slicing):
 

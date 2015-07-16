@@ -26,8 +26,8 @@
             ["mito",[2]]
         ],
         "augmentation":{
-            "n": 4,
-            "sigmaScaling": 0.25,
+            "n": 2,
+            "sigmaScaling": 0.4,
             "clipScaling":[0.5 , 1.5],
             "channelSettings":[
                 {
@@ -45,13 +45,13 @@
                 "name" : "ilastik_features",
                 "input_channels" : [0],
                 "kwargs":{
-                    "sigmas":           [0.3, 0.7, 1.0, 1.6, 2.5, 3.5, 5.0, 10.0],
-                    "smooth":           [1,   1,   1,   1,   1,   1,   1,   1   ],
-                    "laplacian":        [0,   1,   1,   1,   1,   1,   1,   0   ],
-                    "gradMag":          [0,   1,   1,   1,   1,   1,   1,   0   ],
-                    "stEigeValS2":      [0,   1,   1,   1,   1,   1,   1,   0   ],
-                    "stEigeValS4":      [0,   1,   1,   1,   1,   1,   0,   0   ],
-                    "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   0   ]
+                    "sigmas":           [0.3, 0.7, 1.0, 2.0, 3.0, 4.0],
+                    "smooth":           [1,   1,   1  , 1  , 1  , 1  ],
+                    "laplacian":        [0,   1,   1  , 1  , 1  , 1  ],
+                    "gradMag":          [0,   0,   0  , 0  , 0  , 0  ],
+                    "stEigeValS2":      [0,   1,   1  , 1  , 1  , 1  ],
+                    "stEigeValS4":      [0,   1,   1  , 1  , 1  , 1  ],
+                    "hessianEigenVal":  [0,   1,   1  , 1  , 1  , 1  ]
                 }
             }
         ],

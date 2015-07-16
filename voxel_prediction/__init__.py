@@ -176,7 +176,7 @@ class VoxelPredict(object):
             fComps,dataLoaders = self.getFeatureComps(path, key)
 
             maxM = self.maxMargin(fComps)
-
+            maxM = self.dataAugmentor.margin(maxM)
             print("the total margin",maxM)
 
             ######################################################
@@ -203,21 +203,43 @@ class VoxelPredict(object):
                         gt = gt.reshape(gt.shape[0:3])
 
                     #print("GT uniQUE",numpy.unique(gt),gt.min(),gt.max())
-                    gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(gt,self.rLabels, nLabelsInBlock)
+                    #gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(gt,self.rLabels, nLabelsInBlock)
                     #print(gtVoxelsLabels)
-                    gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
+                    #gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
 
                     #print("get the total data array")
                     blockWithTotalMargin = block_.blockWithMargin(maxM)
-                    dataWithAllChannels_ = dataLoaders[0].load(blockWithTotalMargin.outerBlock.slicing)
+                    dataWithAllChannels_ = dataLoaders[0].loadAllChannels(blockWithTotalMargin.outerBlock.slicing)
                     s = appendSingleton(blockWithTotalMargin.outerBlock.slicing)
-                    gtWithMargin = gtDataset[tuple(s)]
-                    for i in range(self.dataAugmentor.nAugmentations() +1):
 
-                        if i == 0:
+                    maskedGtWithMargin = gtDataset[tuple(s)]
+
+                    skl.maskLabels(maskedGtWithMargin.squeeze(),
+                                    blockWithTotalMargin.localInnerBlock.begin,
+                                    blockWithTotalMargin.localInnerBlock.end)
+
+                    for i in range(self.dataAugmentor.nAugmentations() +1):
+                        
+                        if i==0:
                             dataWithAllChannels = dataWithAllChannels_
+                            labels = maskedGtWithMargin
                         else:
-                            dataWithAllChannels = self.dataAugmentor(dataWithAllChannels_)
+                            dataWithAllChannels,labels = self.dataAugmentor(dataWithAllChannels_, 
+                                                                            labels=maskedGtWithMargin)
+
+                        # WHERE is gt
+                        nLabelsInBlock,roiBeginLocal, roiEndLocal = skl.countLabelsAndFindRoi(labels.squeeze(), flatLabels)
+                        if nLabelsInBlock == 0 :
+                            #print("ZERO")
+                            continue
+                        gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(labels.squeeze(),self.rLabels, nLabelsInBlock)
+
+
+                        #print("where gt",whereGt.shape,nLabelsInBlock)
+
+                        #print(gtVoxelsLabels)
+                        gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
+
 
                         # compute the features
                         blockFeatures = []
@@ -226,21 +248,62 @@ class VoxelPredict(object):
                             fComp = fComps[fCompIndex]
                             dataLoader = dataLoaders[fCompIndex]
                             blockWithMargin = block_.blockWithMargin(fComp.margin())
-                            #dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)     
-                            dataArray = dataWithAllChannels[:,:,:,fComp.inputChannels]
+                            #dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)   
+                            print("DA",dataWithAllChannels.shape)
+                            print(fComp.inputChannels)
+                            dataArray = dataWithAllChannels[:,:,:,fComp.inputChannels[0]].copy()
+                            print("dataArray",dataArray.shape)
+                            dataArray = vigra.taggedView(dataArray,'xyz')
+                            print("MIMA ",dataArray.min(),dataArray.max())
 
+
+                            assert numpy.isinf(numpy.sum(dataArray)) == False
+                            assert numpy.isnan(numpy.sum(dataArray)) == False
 
                             if dataArray.ndim == 4 and dataArray.shape[3] == 1:
                                 dataArray = dataArray.reshape(dataArray.shape[0:3])
 
                             # heavy load (C++)
+                            print("SCHAPE",dataArray.shape,"ROI   ",roiBeginLocal,roiEndLocal)
+
+                            
+
+                            assert roiBeginLocal[0] >= 0 
+                            assert roiBeginLocal[1] >= 0 
+                            assert roiBeginLocal[2] >= 0 
+
+                            assert roiBeginLocal[0] < dataArray.shape[0]
+                            assert roiBeginLocal[1] < dataArray.shape[1]
+                            assert roiBeginLocal[2] < dataArray.shape[2]
+
+
+                            assert roiEndLocal[0] > 0 
+                            assert roiEndLocal[1] > 0 
+                            assert roiEndLocal[2] > 0 
+
+                            assert roiEndLocal[0] <= dataArray.shape[0]
+                            assert roiEndLocal[1] <= dataArray.shape[1]
+                            assert roiEndLocal[2] <= dataArray.shape[2]
+
+                            assert whereGt[:,0].max() < dataArray.shape[0]
+                            assert whereGt[:,1].max() < dataArray.shape[1]
+                            assert whereGt[:,2].max() < dataArray.shape[2]
+
+                            assert whereGt[:,0].min() >= 0
+                            assert whereGt[:,1].min() >= 0
+                            assert whereGt[:,2].min() >= 0
+
+                            print("F...")
                             newFeatures = fComp.trainFeatures(
                                 array=dataArray,
-                                roiBegin=blockWithTotalMargin.localInnerBlock.begin,
-                                roiEnd=blockWithTotalMargin.localInnerBlock.end,
+                                roiBegin=roiBeginLocal,
+                                roiEnd=roiEndLocal,
                                 whereGt=whereGt
                             )
-
+                            print("...DONE")
+                            newFeatures = numpy.nan_to_num(newFeatures)
+                            assert numpy.isinf(numpy.sum(newFeatures)) == False
+                            assert numpy.isnan(numpy.sum(newFeatures)) == False
                             blockFeatures.append(newFeatures)
 
                         blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
@@ -256,9 +319,9 @@ class VoxelPredict(object):
                     lock_.release()
 
                 for block,nLabelsInBlock in blocksWithLabels:
-                    futureRes = executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
-                    futureRes.add_done_callback(reraise)
-                    #fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    #futureRes = executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    #futureRes.add_done_callback(reraise)
+                    fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
 
             pbar.finish()
 

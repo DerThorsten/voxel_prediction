@@ -74,18 +74,52 @@ class DataAugmentor(object):
     def nAugmentations(self):
         return self.n
 
+    def margin(self, fCompMargin):
+        minScale = float(self.clipScaling[0]) 
+        rMinScale = 1.0/minScale
+        return tuple([int(float(m)*rMinScale+0.5) for m in fCompMargin])
 
-    def __call__(self, inputData, labels=None):
+
+
+
+
+
+    def __call__(self, inputData, labels):
         if inputData.ndim == 3:
             inputData = inputData[:, :, :, None]
 
-        augmentedInputData = numpy.zeros(inputData.shape, dtype='float32')
+        # get the new shape
+        shape = inputData.shape[0:3]
+        fac = numpy.random.normal(1,self.sigmaScaling)
+        #print("fac",fac)
+        fac = numpy.clip(fac,self.clipScaling[0], self.clipScaling[1])
+        print("fac",fac)
+        newShape = [int(float(s)*fac +0.5) for s in shape]
+
+
+        # resize data
+        inputData = vigra.taggedView(inputData,'xyzc')
+        sInputData = vigra.sampling.resize(inputData, newShape, order=3)
+
+        # resize labels
+        flabels = labels.astype('float32').squeeze()
+        flabels = vigra.taggedView(flabels,'xyz')
+        sLabels = vigra.sampling.resize(flabels, newShape, order=0).astype('uint32')
+            
+
+        assert numpy.isnan(numpy.sum(sLabels)) == False
+        assert numpy.isnan(numpy.sum(sInputData)) == False
+
+        augmentedInputData = numpy.zeros(sInputData.shape, dtype='float32')
         for c in range(self.nChannels):
             cs = self.channelKwargs[c]
-            inputDataC = inputData[:, :, :, c] 
+            inputDataC = sInputData[:, :, :, c] 
             if cs is None:
                 augmentedInputData[:, :, :, c] = inputDataC
             else:
                 augmentedInputData[:, :, :, c] = augmentRaw(inputDataC,**cs)
 
-        return augmentedInputData.astype('float32')
+        assert numpy.isnan(numpy.sum(augmentedInputData)) == False
+
+
+        return augmentedInputData.astype('float32'),sLabels
