@@ -29,6 +29,7 @@ class VoxelPredict(object):
 
     def __init__(self, projectFile):
         self.projectFile = projectFile
+        self.nChannels  = projectFile['input_data']['nChannels']
         self.blockShape = tuple(self.projectFile['settings']['block_shape'])
 
     def getH5Path(self, dataName):
@@ -120,7 +121,14 @@ class VoxelPredict(object):
             margin = map(max, zip(m, margin))
         return margin
 
+
+    def createDataAugmentor(self):
+        kwargs = self.projectFile['prediction']['augmentation']
+        self.dataAugmentor = DataAugmentor(nChannels=self.nChannels,**kwargs)
+
     def doTraining(self):
+
+        self.createDataAugmentor()
 
         layer = self.projectFile['prediction']
 
@@ -202,13 +210,14 @@ class VoxelPredict(object):
                     #print("get the total data array")
                     blockWithTotalMargin = block_.blockWithMargin(maxM)
                     dataWithAllChannels_ = dataLoaders[0].load(blockWithTotalMargin.outerBlock.slicing)
-
-                    for i in range(2):
+                    s = appendSingleton(blockWithTotalMargin.outerBlock.slicing)
+                    gtWithMargin = gtDataset[tuple(s)]
+                    for i in range(self.dataAugmentor.nAugmentations() +1):
 
                         if i == 0:
                             dataWithAllChannels = dataWithAllChannels_
                         else:
-                            dataWithAllChannels = augmentRaw(dataWithAllChannels_.squeeze())[:,:,:,None]
+                            dataWithAllChannels = self.dataAugmentor(dataWithAllChannels_)
 
                         # compute the features
                         blockFeatures = []
@@ -260,23 +269,18 @@ class VoxelPredict(object):
             # close the gt dataset
             gtFile.close()
 
+
+
         labelsArray =  numpy.concatenate(labels)
         labelsArray = numpy.require(labelsArray, dtype='uint32')[:,None]
         featureArray = numpy.concatenate(features,axis=1).T
 
-        featureArray, labelsArray = self.prepareTrainingSet(featureArray,labelsArray)
+        self.learnRf(X=featureArray, Y=labelsArray)
 
 
-    
-
-        print("learn rf")
-        rf = vigra.learning.RandomForest(treeCount=256)
-        oob = rf.learnRF(featureArray, labelsArray)
-        print("OOB",oob)
-        self.saveRf(layer, rf)
 
 
-    def prepareTrainingSet(self,featureArray, labelsArray,varMult=0.05, n=15):
+    def prepareTrainingSet(self,featureArray, labelsArray,varMult, n):
         print("Raw Features ",featureArray.shape)
         #print("labelsArray",labelsArray.shape)
         outputFolder = self.projectFile['output']['output_folder']
@@ -287,10 +291,36 @@ class VoxelPredict(object):
         return augmentGaussianPertubation(featureArray,labelsArray,
                                           varMult=varMult,n=n)
         
+    
+
+    def learnRf(self,X,Y):
         
+        print("learn rf (#examples %d #features %d)"%X.shape)
 
 
-    def saveRf(self,layer, rf):
+        cOpt = self.projectFile['prediction']['classifier']
+
+        varMult = cOpt['varMult']
+        nPertubations = cOpt['nPertubations']
+        treeCount = cOpt['treeCount']
+        mTry = cOpt['mTry']
+        if mTry == 'sqrt':
+            mTry = int(numpy.sqrt(float(X.shape[1]))+0.5)
+        minSplitNodeSize = cOpt['minSplitNodeSize']
+        sampleClassesIndividually = cOpt['sampleClassesIndividually']
+        minSplitNodeSize = cOpt['minSplitNodeSize']
+
+        if nPertubations > 0 :
+            X, Y = self.prepareTrainingSet(X,Y, varMult=varMult, n=nPertubations)
+
+        Rf = vigra.learning.RandomForest
+        rf = Rf(treeCount=treeCount, mtry=mTry,
+                min_split_node_size=minSplitNodeSize,
+                sample_classes_individually=sampleClassesIndividually)
+
+        oob = rf.learnRF(X, Y)
+        print("OOB",oob)
+
         outputFolder = self.projectFile['output']['output_folder']
         ensure_dir(outputFolder)
         rf.writeHDF5(outputFolder+"vigra_rf.h5")
@@ -415,32 +445,7 @@ class VoxelPredict(object):
                 subshape = [None]*3
                 #print("nFeat",nFeat,"initshape",allFeatures.shape)
 
-                canDoDs = True
-                if downsample>1:
-                    for d in range(3):
-                        if sshape[d]<6:
-                            canDoDs = False
-                            break
-
-
-                if downsample>1 and canDoDs:
-                    for d in range(3):
-                        if sshape[d]<15:
-                            subshape[d] = sshape[d]
-                        else:
-                            subshape[d] = int((float(sshape[d])/downsample)+0.5)
-                    #print("subshape",subshape)
-
-                    allFeaturesV = numpy.rollaxis(allFeatures,0,4)
-                    #print("allFeaturesV",allFeaturesV.shape)
-                    va = vigra.taggedView(allFeaturesV, "xyzc")
-                    allFeatures = vigra.sampling.resize(va, subshape,order=0)
-                    allFeatures = numpy.rollaxis(allFeatures,3)
-
-                    #print("after reshape shape",allFeatures.shape)
-
-
-                
+               
 
                 allFeaturesFlat = allFeatures.reshape([nFeat,-1]).T
 
@@ -450,11 +455,6 @@ class VoxelPredict(object):
                 #print("probs",probs.shape)
 
                 probs = probs.reshape(allFeatures.shape[1:4]+(nTargets,))
-                if downsample>1 and canDoDs:
-                    probs = vigra.taggedView(probs,'xyzc')
-                    probs = vigra.sampling.resize(probs,sshape,order=3)
-    
-
 
                 #print("probs",probs.shape)
                 slicing = block_.slicing + [slice(0,nTargets)]

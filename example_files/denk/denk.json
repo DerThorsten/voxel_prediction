@@ -1,5 +1,6 @@
 {
     "input_data" : {
+        "nChannels":1,
         "denk_block" : {
             "data" : {
                 "path": "/home/tbeier/src/voxel_prediction/example_files/denk/denk_raw.h5",
@@ -25,14 +26,19 @@
             ["mito",[2]]
         ],
         "augmentation":{
-            "nAugmentation":10,
-            "0":{
-                "name":"rawAugmentor",
-                "lAdd":8.0,
-                "gAdd":10.0,
-                "gMult":0.3,
-                "clip":[0.0,255]
-            }
+            "n": 4,
+            "sigmaScaling": 0.25,
+            "clipScaling":[0.5 , 1.5],
+            "channelSettings":[
+                {
+                    "channels":[0],
+                    "lAdd":8.0,
+                    "gAdd":10.0,
+                    "gMult":0.3,
+                    "clip":[0.0,255]
+                }
+            ]
+            
         },
         "features":[
             {
@@ -48,6 +54,14 @@
                     "hessianEigenVal":  [0,   0,   1,   1,   1,   1,   1,   0   ]
                 }
             }
-        ]
+        ],
+        "classifier":{
+            "varMult":0.05,
+            "nPertubations":2,
+            "treeCount":255,
+            "mTry":"sqrt",
+            "minSplitNodeSize":10,
+            "sampleClassesIndividually":true
+        }
     }
 }
