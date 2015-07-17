@@ -317,15 +317,16 @@ class VoxelPredict(object):
         vigra.impex.writeHDF5(featureArray,outputFolder+"features_X.h5","data")
         vigra.impex.writeHDF5(featureArray,outputFolder+"labels.h5","data")
 
-        return augmentGaussianPertubation(featureArray,labelsArray,
+        print("augment gaussian")
+        X,Y = augmentGaussianPertubation(featureArray,labelsArray,
                                           varMult=varMult,n=n)
-        
-    
+        print("augment gaussian done")
+        return X,Y
 
     def learnRf(self,X,Y):
         
         print("learn rf (#examples %d #features %d)"%X.shape)
-
+        print("unique",numpy.unique(Y))
 
         cOpt = self.projectFile['prediction']['classifier']
 
@@ -334,6 +335,7 @@ class VoxelPredict(object):
         treeCount = cOpt['treeCount']
         mTry = cOpt['mTry']
         if mTry == 'sqrt':
+            print("mTry",mTry)
             mTry = int(numpy.sqrt(float(X.shape[1]))+0.5)
         minSplitNodeSize = cOpt['minSplitNodeSize']
         sampleClassesIndividually = cOpt['sampleClassesIndividually']
@@ -346,7 +348,7 @@ class VoxelPredict(object):
         rf = Rf(treeCount=treeCount, mtry=mTry,
                 min_split_node_size=minSplitNodeSize,
                 sample_classes_individually=sampleClassesIndividually)
-
+        print("X",X.shape,"Y",Y.shape)
         oob = rf.learnRF(X, Y)
         print("OOB",oob)
 
@@ -413,6 +415,8 @@ class VoxelPredict(object):
 
         # get number of targets
         nTargets = len(layer['targets'])
+
+        #print("nTargets",nTargets)
 
         # inspect the shape and get blocking
         f = h5py.File(dataPath, 'r')
@@ -481,7 +485,9 @@ class VoxelPredict(object):
                 #print("allFeaturesFlat",allFeaturesFlat.shape)
 
                 probs = rf.predictProbabilities(allFeaturesFlat.view(numpy.ndarray))
+                
                 #print("probs",probs.shape)
+                #print("allFeatures",allFeatures.shape)
 
                 probs = probs.reshape(allFeatures.shape[1:4]+(nTargets,))
 
