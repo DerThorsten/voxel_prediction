@@ -36,12 +36,8 @@ class VoxelPredict(object):
         dataInfo = self.projectFile['input_data'][dataName]['data']
         return dataInfo['path'],dataInfo['key']
 
-
-    def getGt(self, name):
-        return self.projectFile['input_data'][name]['gt']
-
     def getAndOpenGt(self, name):
-        gtInfo = self.getGt(name)
+        gtInfo = self.projectFile['input_data'][name]['gt']
         gtFile = h5py.File(gtInfo['path'],'r')
         gtDataset = gtFile[gtInfo['key']]
         return gtFile, gtDataset
@@ -198,25 +194,24 @@ class VoxelPredict(object):
                     # get slicing of the block
                     s = appendSingleton(block_.slicing)
 
-                    gt = gtDataset[tuple(s)]#.squeeze()
-                    if gt.ndim == 4:
-                        gt = gt.reshape(gt.shape[0:3])
+                    #gt = gtDataset[tuple(s)]#.squeeze()
+                    #if gt.ndim == 4:
+                    #    gt = gt.reshape(gt.shape[0:3])
 
-                    #print("GT uniQUE",numpy.unique(gt),gt.min(),gt.max())
-                    #gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(gt,self.rLabels, nLabelsInBlock)
-                    #print(gtVoxelsLabels)
-                    #gtVoxels = (whereGt[:,0],whereGt[:,1],whereGt[:,2])
+                    #gt = skneuro.loadFromDataset(gtDataset, block_.slicing)
 
                     #print("get the total data array")
                     blockWithTotalMargin = block_.blockWithMargin(maxM)
                     dataWithAllChannels_ = dataLoaders[0].loadAllChannels(blockWithTotalMargin.outerBlock.slicing)
                     s = appendSingleton(blockWithTotalMargin.outerBlock.slicing)
 
-                    maskedGtWithMargin = gtDataset[tuple(s)]
+                    gtWithMargin = gtDataset[tuple(s)]
 
-                    skl.maskLabels(maskedGtWithMargin.squeeze(),
+                    maskedGtWithMargin = skl.maskData(gtWithMargin.squeeze(),
                                     blockWithTotalMargin.localInnerBlock.begin,
                                     blockWithTotalMargin.localInnerBlock.end)
+
+                    assert maskedGtWithMargin.shape[0:3] == dataWithAllChannels_.shape[0:3]
 
                     for i in range(self.dataAugmentor.nAugmentations() +1):
                         
@@ -227,14 +222,22 @@ class VoxelPredict(object):
                             dataWithAllChannels,labels = self.dataAugmentor(dataWithAllChannels_, 
                                                                             labels=maskedGtWithMargin)
 
+
+
+                        #grayData = [(dataWithAllChannels, "raw")]
+                        #segData  = [(labels,"ll")]
+                        #skneuro.addHocViewer(grayData, segData)
+                            
+
+
                         # WHERE is gt
                         nLabelsInBlock,roiBeginLocal, roiEndLocal = skl.countLabelsAndFindRoi(labels.squeeze(), flatLabels)
                         if nLabelsInBlock == 0 :
                             #print("ZERO")
                             continue
                         gtVoxelsLabels, whereGt =  skl.getLabelsAndLocation(labels.squeeze(),self.rLabels, nLabelsInBlock)
-
-
+                        b = numpy.array(roiBeginLocal,dtype='uint32')
+                        whereGt -= b[None,:]
                         #print("where gt",whereGt.shape,nLabelsInBlock)
 
                         #print(gtVoxelsLabels)
@@ -249,61 +252,24 @@ class VoxelPredict(object):
                             dataLoader = dataLoaders[fCompIndex]
                             blockWithMargin = block_.blockWithMargin(fComp.margin())
                             #dataArray = dataLoader.load(blockWithMargin.outerBlock.slicing)   
-                            print("DA",dataWithAllChannels.shape)
-                            print(fComp.inputChannels)
                             dataArray = dataWithAllChannels[:,:,:,fComp.inputChannels[0]].copy()
-                            print("dataArray",dataArray.shape)
                             dataArray = vigra.taggedView(dataArray,'xyz')
-                            print("MIMA ",dataArray.min(),dataArray.max())
 
 
-                            assert numpy.isinf(numpy.sum(dataArray)) == False
-                            assert numpy.isnan(numpy.sum(dataArray)) == False
+                            # assert numpy.isinf(numpy.sum(dataArray)) == False
+                            #assert numpy.isnan(numpy.sum(dataArray)) == False
 
                             if dataArray.ndim == 4 and dataArray.shape[3] == 1:
                                 dataArray = dataArray.reshape(dataArray.shape[0:3])
 
-                            # heavy load (C++)
-                            print("SCHAPE",dataArray.shape,"ROI   ",roiBeginLocal,roiEndLocal)
-
-                            
-
-                            assert roiBeginLocal[0] >= 0 
-                            assert roiBeginLocal[1] >= 0 
-                            assert roiBeginLocal[2] >= 0 
-
-                            assert roiBeginLocal[0] < dataArray.shape[0]
-                            assert roiBeginLocal[1] < dataArray.shape[1]
-                            assert roiBeginLocal[2] < dataArray.shape[2]
-
-
-                            assert roiEndLocal[0] > 0 
-                            assert roiEndLocal[1] > 0 
-                            assert roiEndLocal[2] > 0 
-
-                            assert roiEndLocal[0] <= dataArray.shape[0]
-                            assert roiEndLocal[1] <= dataArray.shape[1]
-                            assert roiEndLocal[2] <= dataArray.shape[2]
-
-                            assert whereGt[:,0].max() < dataArray.shape[0]
-                            assert whereGt[:,1].max() < dataArray.shape[1]
-                            assert whereGt[:,2].max() < dataArray.shape[2]
-
-                            assert whereGt[:,0].min() >= 0
-                            assert whereGt[:,1].min() >= 0
-                            assert whereGt[:,2].min() >= 0
-
-                            print("F...")
                             newFeatures = fComp.trainFeatures(
                                 array=dataArray,
                                 roiBegin=roiBeginLocal,
                                 roiEnd=roiEndLocal,
                                 whereGt=whereGt
                             )
-                            print("...DONE")
+                            #print("...DONE")
                             newFeatures = numpy.nan_to_num(newFeatures)
-                            assert numpy.isinf(numpy.sum(newFeatures)) == False
-                            assert numpy.isnan(numpy.sum(newFeatures)) == False
                             blockFeatures.append(newFeatures)
 
                         blockFeatureArray = numpy.concatenate(blockFeatures, axis=0)
@@ -319,9 +285,9 @@ class VoxelPredict(object):
                     lock_.release()
 
                 for block,nLabelsInBlock in blocksWithLabels:
-                    #futureRes = executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
-                    #futureRes.add_done_callback(reraise)
-                    fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    futureRes = executor.submit(fThread,block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
+                    futureRes.add_done_callback(reraise)
+                    #fThread(block_=block,nLabelsInBlock=nLabelsInBlock,lock_=lock,labels_=labels,doneBlocks=doneBlocks)
 
             pbar.finish()
 

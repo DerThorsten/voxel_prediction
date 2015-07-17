@@ -93,7 +93,7 @@ class DataAugmentor(object):
         fac = numpy.random.normal(1,self.sigmaScaling)
         #print("fac",fac)
         fac = numpy.clip(fac,self.clipScaling[0], self.clipScaling[1])
-        print("fac",fac)
+        #print("fac",fac)
         newShape = [int(float(s)*fac +0.5) for s in shape]
 
 
@@ -107,8 +107,8 @@ class DataAugmentor(object):
         sLabels = vigra.sampling.resize(flabels, newShape, order=0).astype('uint32')
             
 
-        assert numpy.isnan(numpy.sum(sLabels)) == False
-        assert numpy.isnan(numpy.sum(sInputData)) == False
+        #assert numpy.isnan(numpy.sum(sLabels)) == False
+        #assert numpy.isnan(numpy.sum(sInputData)) == False
 
         augmentedInputData = numpy.zeros(sInputData.shape, dtype='float32')
         for c in range(self.nChannels):
@@ -119,7 +119,7 @@ class DataAugmentor(object):
             else:
                 augmentedInputData[:, :, :, c] = augmentRaw(inputDataC,**cs)
 
-        assert numpy.isnan(numpy.sum(augmentedInputData)) == False
+        #assert numpy.isnan(numpy.sum(augmentedInputData)) == False
 
 
         return augmentedInputData.astype('float32'),sLabels
